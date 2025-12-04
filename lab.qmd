@@ -16,8 +16,9 @@ library(readr)
 
 # top S&P tickers by market cap exlcuding recents like NVDA, TSLA
 TICKERS <- c(
-  "AAPL","MSFT","AMZN","GOOGL","AVGO","META","BRK.B","LLY","WMT","JPM",
-  "V","ORCL","MA","XOM","JNJ"
+  "AAPL","MSFT","AMZN"#,
+  #"GOOGL","AVGO","META","BRK.B","LLY","WMT","JPM",
+  #"V","ORCL","MA","XOM","JNJ"
 )
 
 #API_KEY <- ""
@@ -33,18 +34,18 @@ meta <- tibble::tribble(
   "AAPL",  "Apple",                                "Information Technology",
   "MSFT",  "Microsoft",                            "Information Technology",
   "AMZN",  "Amazon",                               "Consumer Discretionary",
-  "GOOGL", "Alphabet (Class A)",                   "Communication Services",
-  "AVGO",  "Broadcom",                             "Information Technology",
-  "META",  "Meta Platforms",                       "Communication Services",
-  "BRK.B", "Berkshire Hathaway (Class B)",         "Financials",
-  "LLY",   "Eli Lilly",                            "Health Care",
-  "WMT",   "Walmart",                              "Consumer Staples",
-  "JPM",   "JPMorgan Chase",                       "Financials",
-  "V",     "Visa",                                 "Financials",
-  "ORCL",  "Oracle",                               "Information Technology",
-  "MA",    "Mastercard",                           "Financials",
-  "XOM",   "Exxon Mobil",                          "Energy",
-  "JNJ",   "Johnson & Johnson",                    "Health Care"
+  # "GOOGL", "Alphabet (Class A)",                   "Communication Services",
+  # "AVGO",  "Broadcom",                             "Information Technology",
+  # "META",  "Meta Platforms",                       "Communication Services",
+  # "BRK.B", "Berkshire Hathaway (Class B)",         "Financials",
+  # "LLY",   "Eli Lilly",                            "Health Care",
+  # "WMT",   "Walmart",                              "Consumer Staples",
+  # "JPM",   "JPMorgan Chase",                       "Financials",
+  # "V",     "Visa",                                 "Financials",
+  # "ORCL",  "Oracle",                               "Information Technology",
+  # "MA",    "Mastercard",                           "Financials",
+  # "XOM",   "Exxon Mobil",                          "Energy",
+  # "JNJ",   "Johnson & Johnson",                    "Health Care"
 )
 write_csv(meta, OUT_META)
 
@@ -100,11 +101,11 @@ PRICES_CSV <- "data/sp500_top15_prices_long.csv"
 META_CSV    <- "data/sp500_top15_meta.csv"
 
 P_LAGS  <- 5            # VAR order
-STRUCT  <- "Basic"      # regularization structure (start simple)
-GRAN    <- c(150, 10)   # lambda grid: (path length, # grid points)
-H_IRF   <- 100           # horizons: 0..20
+STRUCT  <- "BasicEN"      # regularization structure (EN elastic net)
+GRAN    <- c(500, 50)   # lambda grid: (path length, # grid points)
+H_IRF   <- 20           # horizons: 0..20
 SHOCK_SD <- 2           # 2-SD joint shocks
-
+ALPHA_GRID <- seq(0.05, .5, by = 0.05)   # 1 = pure lasso, smaller = more ridge
 # -----------------------------
 # 1) Load data
 # -----------------------------
@@ -168,28 +169,52 @@ train_idx <- 1:(T1 - 1)
 # -----------------------------
 
 
-mod <- constructModel(
+mod_en <- constructModel(
   Y,
-  p      = P_LAGS,
-  struct = STRUCT,
-  gran   = GRAN,
-  h      = 1,
-  cv     = "Rolling",
-  T1     = T1,
-  T2     = T2,
+  p       = P_LAGS,
+  struct  = STRUCT,
+  gran    = GRAN,          # your lambda grid settings
+  h       = 1,
+  cv      = "Rolling",
+  T1      = T1,
+  T2      = T2,
+  IC      = FALSE,
   verbose = FALSE,
-  IC = FALSE,
-  model.controls = list(intercept = FALSE)
+  model.controls = list(
+    intercept = TRUE,      # IMPORTANT for price levels
+    alpha     = ALPHA_GRID
+  )
 )
 
-fit <- cv.BigVAR(mod)
-print(fit)
+fit_en <- cv.BigVAR(mod_en)
+print(fit_en)
+SparsityPlot.BigVAR.results(fit_en)
 LAMBDA_FIXED <- fit@OptimalLambda
-# Sparsity plot (built-in)
-SparsityPlot.BigVAR.results(fit)
+#
 
 
+extract_phi_from_fit <- function(fit, K, p) {
+  B <- as.matrix(fit@betaPred)
+  if (ncol(B) == K * p + 1) B <- B[, -1, drop = FALSE]
+  Phi <- array(0, dim = c(K, K, p))
+  for (lag in 1:p) {
+    cols <- ((lag - 1) * K + 1):(lag * K)
+    Phi[, , lag] <- B[, cols, drop = FALSE]
+  }
+  Phi
+}
 
+companion_max_root <- function(Phi) {
+  K <- dim(Phi)[1]; p <- dim(Phi)[3]
+  F <- matrix(0, nrow = K*p, ncol = K*p)
+  F[1:K, 1:(K*p)] <- do.call(cbind, lapply(1:p, \(j) Phi[, , j]))
+  if (p > 1) F[(K+1):(K*p), 1:(K*(p-1))] <- diag(K*(p-1))
+  max(Mod(eigen(F, only.values = TRUE)$values))
+}
+
+Phi_en <- extract_phi_from_fit(fit_en, K = ncol(Y), p = P_LAGS)
+max_root <- companion_max_root(Phi_en)
+max_root
 
 ```
 
@@ -355,13 +380,15 @@ for (b in 1:B_BOOT) {
 # 90% CI band (5%–95%)
 ci_lo <- apply(boot_paths, c(1, 2), quantile, probs = 0.05, na.rm = TRUE)
 ci_hi <- apply(boot_paths, c(1, 2), quantile, probs = 0.95, na.rm = TRUE)
+MED <- apply(boot_paths, c(1, 2), quantile, probs = 0.5, na.rm = TRUE)
 
 jirf_ci_long <- tibble(
   response = rep(TICKERS, each = H_IRF),
   horizon  = rep(0:(H_IRF - 1), times = K),
   point    = as.vector(jirf_hat),
   lo       = as.vector(ci_lo),
-  hi       = as.vector(ci_hi)
+  hi       = as.vector(ci_hi),
+  MED      = as.vector(MED)
 ) %>%
   left_join(meta %>% select(symbol, sector) %>% rename(response = symbol, response_sector = sector),
             by = "response")
@@ -371,7 +398,7 @@ jirf_ci_long <- tibble(
 # ============================================================
 
 p_tech_jirf <- jirf_ci_long %>%
-  ggplot(aes(x = horizon, y = point)) +
+  ggplot(aes(x = horizon, y = MED)) +
   geom_hline(yintercept = 0) +
   geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2) +
   geom_line() +
