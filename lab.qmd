@@ -159,7 +159,7 @@ Tn <- nrow(Y)
 K  <- ncol(Y)
 
 T1 <- floor(0.60 * Tn)
-T2 <- floor(0.80 * Tn)
+T2 <- floor(0.65 * Tn)
 
 train_idx <- 1:(T1 - 1)
 
@@ -315,7 +315,7 @@ rownames(jirf_hat) <- TICKERS
 # ============================================================
 
 # Use the lambda selected by cross-validation
-LAMBDA_FIXED <- as.numeric(fit@OptimalLambda)[1]
+LAMBDA_FIXED <- as.numeric(fit_en@OptimalLambda)[1]
 
 simulate_var_resid_boot <- function(Y_init, Phi, E) {
   Tn <- nrow(Y_init); K <- ncol(Y_init); p <- dim(Phi)[3]
