@@ -1,16 +1,16 @@
 symbol,company,sector
-NVDA,NVIDIA,Information Technology
 AAPL,Apple,Information Technology
 MSFT,Microsoft,Information Technology
 AMZN,Amazon,Consumer Discretionary
 GOOGL,Alphabet (Class A),Communication Services
 AVGO,Broadcom,Information Technology
 META,Meta Platforms,Communication Services
-TSLA,Tesla,Consumer Discretionary
 BRK.B,Berkshire Hathaway (Class B),Financials
 LLY,Eli Lilly,Health Care
 WMT,Walmart,Consumer Staples
 JPM,JPMorgan Chase,Financials
 V,Visa,Financials
 ORCL,Oracle,Information Technology
+MA,Mastercard,Financials
 XOM,Exxon Mobil,Energy
+JNJ,Johnson & Johnson,Health Care

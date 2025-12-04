@@ -9,122 +9,75 @@ editor: visual
 We will use AlphaVantage and the `tidyquant` package to get price history and other metadata. 
 
 ```{r}
-# # ============================================================
-# # CLEAN Alpha Vantage fetch (teaching version)
-# # - Pulls DAILY ADJUSTED (full history)
-# # - Builds long prices + wide returns CSVs for your BigVAR lab
-# # ============================================================
-# 
-# library(tidyverse)
-# library(lubridate)
-# library(httr2)
-# library(readr)
-# 
-# # 1) Universe: top 15 (keep GOOGL, add XOM, drop GOOG)
-# TICKERS <- c(
-#   "NVDA","AAPL","MSFT","AMZN","GOOGL","AVGO","META","TSLA","BRK.B",
-#   "LLY","WMT","JPM","V","ORCL","XOM"
-# )
-# 
-# # 2) Your API key (recommended: put this in .Renviron instead)
-# #API_KEY <- Sys.getenv("ALPHAVANTAGE_API_KEY")
-# # or: API_KEY <- "PASTE_YOUR_KEY_HERE"
-# 
-# # 3) Where to save outputs
-# dir.create("data", showWarnings = FALSE)
-# OUT_PRICES  <- "data/sp500_top15_prices_long.csv"
-# OUT_RETURNS <- "data/sp500_top15_returns.csv"
-# OUT_META    <- "data/sp500_top15_meta.csv"
-# 
-# # 4) Hard-coded metadata (sectors) for the 15 tickers
-# meta <- tibble::tribble(
-#   ~symbol, ~company, ~sector,
-#   "NVDA",  "NVIDIA",                               "Information Technology",
-#   "AAPL",  "Apple",                                "Information Technology",
-#   "MSFT",  "Microsoft",                            "Information Technology",
-#   "AMZN",  "Amazon",                               "Consumer Discretionary",
-#   "GOOGL", "Alphabet (Class A)",                   "Communication Services",
-#   "AVGO",  "Broadcom",                             "Information Technology",
-#   "META",  "Meta Platforms",                       "Communication Services",
-#   "TSLA",  "Tesla",                                "Consumer Discretionary",
-#   "BRK.B", "Berkshire Hathaway (Class B)",         "Financials",
-#   "LLY",   "Eli Lilly",                            "Health Care",
-#   "WMT",   "Walmart",                              "Consumer Staples",
-#   "JPM",   "JPMorgan Chase",                       "Financials",
-#   "V",     "Visa",                                 "Financials",
-#   "ORCL",  "Oracle",                               "Information Technology",
-#   "XOM",   "Exxon Mobil",                          "Energy"
-# )
-# 
-# readr::write_csv(meta, OUT_META)
-# 
-# # ------------------------------------------------------------
-# # Function: download ONE ticker from Alpha Vantage (CSV)
-# # ------------------------------------------------------------
-# fetch_daily_adjusted <- function(symbol, api_key) {
-#   req <- request("https://www.alphavantage.co/query") |>
-#     req_url_query(
-#       `function`  = "TIME_SERIES_DAILY_ADJUSTED",
-#       symbol      = symbol,
-#       outputsize  = "full",
-#       datatype    = "csv",
-#       apikey      = api_key
-#     )
-# 
-#   # CSV comes back as text; read it into a tibble
-#   txt <- req |> req_perform() |> resp_body_string()
-#   readr::read_csv(I(txt), show_col_types = FALSE) |>
-#     mutate(symbol = symbol)
-# }
-# 
-# # ------------------------------------------------------------
-# # 5) Fetch all tickers (simple loop)
-# # ------------------------------------------------------------
-# # Note: Alpha Vantage rate-limits. For teaching, we just sleep a bit.
-# prices_long <- map_dfr(TICKERS, function(sym) {
-#   message("Fetching ", sym, " ...")
-#   Sys.sleep(.5)   # adjust for your key/limits
-#   fetch_daily_adjusted(sym, API_KEY)
-# })
-# 
-# # Keep only the fields we care about, and rename timestamp -> date
-# prices_long <- prices_long |>
-#   transmute(
-#     symbol,
-#     date = as.Date(timestamp),
-#     adjusted = adjusted_close
-#   ) |>
-#   arrange(symbol, date)
-# 
-# readr::write_csv(prices_long, OUT_PRICES)
-# 
-# # ------------------------------------------------------------
-# # 6) Compute eturns from adjusted prices
-# # ------------------------------------------------------------
-# returns_long <- prices_long |>
-#   group_by(symbol) |>
-#   arrange(date, .by_group = TRUE) |>
-#   mutate(ret = adjusted / lag(adjusted) - 1) |>
-#   ungroup() |>
-#   filter(!is.na(ret)) |>
-#   select(date, symbol, ret)
-# 
-# # Wide returns, strict intersection of dates across tickers
-# returns_wide <- returns_long |>
-#   pivot_wider(names_from = symbol, values_from = ret) |>
-#   arrange(date) |>
-#   tidyr::drop_na(all_of(TICKERS))
-# 
-# readr::write_csv(returns_wide, OUT_RETURNS)
-# 
-# # ------------------------------------------------------------
-# # 7) Quick check
-# # ------------------------------------------------------------
-# message("Wrote: ", OUT_META)
-# message("Wrote: ", OUT_PRICES)
-# message("Wrote: ", OUT_RETURNS)
-# message("Date range: ", min(returns_wide$date), " to ", max(returns_wide$date))
-# message("Rows (aligned trading days): ", nrow(returns_wide))
+library(tidyverse)
+library(lubridate)
+library(httr2)
+library(readr)
+
+# top S&P tickers by market cap exlcuding recents like NVDA, TSLA
+TICKERS <- c(
+  "AAPL","MSFT","AMZN","GOOGL","AVGO","META","BRK.B","LLY","WMT","JPM",
+  "V","ORCL","MA","XOM","JNJ"
+)
+
+#API_KEY <- ""
+
+dir.create("data", showWarnings = FALSE)
+OUT_PRICES <- "data/sp500_top15_prices_long.csv"
+OUT_RV     <- "data/sp500_top15_rv.csv"
+OUT_META   <- "data/sp500_top15_meta.csv"
+
+# ----- hard-coded meta -----
+meta <- tibble::tribble(
+  ~symbol, ~company, ~sector,
+  "AAPL",  "Apple",                                "Information Technology",
+  "MSFT",  "Microsoft",                            "Information Technology",
+  "AMZN",  "Amazon",                               "Consumer Discretionary",
+  "GOOGL", "Alphabet (Class A)",                   "Communication Services",
+  "AVGO",  "Broadcom",                             "Information Technology",
+  "META",  "Meta Platforms",                       "Communication Services",
+  "BRK.B", "Berkshire Hathaway (Class B)",         "Financials",
+  "LLY",   "Eli Lilly",                            "Health Care",
+  "WMT",   "Walmart",                              "Consumer Staples",
+  "JPM",   "JPMorgan Chase",                       "Financials",
+  "V",     "Visa",                                 "Financials",
+  "ORCL",  "Oracle",                               "Information Technology",
+  "MA",    "Mastercard",                           "Financials",
+  "XOM",   "Exxon Mobil",                          "Energy",
+  "JNJ",   "Johnson & Johnson",                    "Health Care"
+)
+write_csv(meta, OUT_META)
+
+# ----- Alpha Vantage fetch (daily adjusted, CSV) -----
+fetch_daily_adjusted <- function(symbol, api_key) {
+  req <- request("https://www.alphavantage.co/query") |>
+    req_url_query(
+      `function`  = "TIME_SERIES_DAILY_ADJUSTED",
+      symbol      = symbol,
+      outputsize  = "full",
+      datatype    = "csv",
+      apikey      = api_key
+    )
+
+  txt <- req |> req_perform() |> resp_body_string()
+  read_csv(I(txt), show_col_types = FALSE) |>
+    mutate(symbol = symbol)
+}
+
+prices_long <- map_dfr(TICKERS, function(sym) {
+  message("Fetching ", sym, " ...")
+  Sys.sleep(.5)  # adjust for your AV limits
+  fetch_daily_adjusted(sym, API_KEY)
+}) |>
+  transmute(
+    symbol,
+    date = as.Date(timestamp),
+    adjusted = adjusted_close
+  ) |>
+  arrange(symbol, date)
+
+write_csv(prices_long, OUT_PRICES)
+
 
 
 ```
@@ -135,9 +88,6 @@ We will use AlphaVantage and the `tidyquant` package to get price history and ot
 ```{r}
 # ============================================================
 # BigVAR + Sector jIRF Lab (clean student version)
-# - Input files (provided by instructor):
-#     data/sp500_top15_returns.csv   (wide; simple returns)
-#     data/sp500_top15_meta.csv      (symbol, company, sector)
 # ============================================================
 
 library(tidyverse)
@@ -146,41 +96,54 @@ library(BigVAR)
 # -----------------------------
 # 0) Inputs + knobs
 # -----------------------------
-PRICES_
-RETURNS_CSV <- "data/sp500_top15_returns.csv"
+PRICES_CSV <- "data/sp500_top15_prices_long.csv"
 META_CSV    <- "data/sp500_top15_meta.csv"
 
 P_LAGS  <- 5            # VAR order
 STRUCT  <- "Basic"      # regularization structure (start simple)
 GRAN    <- c(150, 10)   # lambda grid: (path length, # grid points)
-H_IRF   <- 21           # horizons: 0..20
+H_IRF   <- 100           # horizons: 0..20
 SHOCK_SD <- 2           # 2-SD joint shocks
 
 # -----------------------------
 # 1) Load data
 # -----------------------------
-returns_wide <- readr::read_csv(RETURNS_CSV, show_col_types = FALSE) %>%
+
+
+prices_long <- readr::read_csv(PRICES_CSV, show_col_types = FALSE) %>% 
   mutate(date = as.Date(date)) %>%
   arrange(date)
+
+prices_wide <- prices_long %>%
+  pivot_wider(names_from = symbol, values_from = adjusted) %>%
+  arrange(date)
+
 
 meta <- readr::read_csv(META_CSV, show_col_types = FALSE) %>%
   mutate(symbol = as.character(symbol))
 
 TICKERS <- meta$symbol
 
-Y <- returns_wide %>%
+
+#make prices_wide into a matrix and filter na's
+Y <- prices_wide %>%
+  filter(is.na(rowSums(across(all_of(TICKERS)))) == FALSE) %>%
   select(all_of(TICKERS)) %>%
   as.matrix()
 
-returns_wide
+prices_wide
 meta
 Y
+
+colnames(prices_wide)
 ```
+
+
 
 ## Prep for fitting BigVar
 
 - define the train/test split
-- standardize the returns based on training set statistics
+
 
 ```{r}
 # -----------------------------
@@ -195,17 +158,6 @@ T2 <- floor(0.80 * Tn)
 
 train_idx <- 1:(T1 - 1)
 
-mu <- colMeans(Y[train_idx, , drop = FALSE])
-sdv <- apply(Y[train_idx, , drop = FALSE], 2, sd)
-
-Y_sc <- scale(Y, center = mu, scale = sdv) %>% as.matrix()
-
-scale(Y, center = mu, scale = sdv) %>% 
-  ggplot(aes(x = NVDA)) + geom_histogram()
-
-Y_sc
-
-
 ```
 
 ## Fit the BigVar with rolling Cross validation and lasso regularization
@@ -214,8 +166,10 @@ Y_sc
 # -----------------------------
 # 3) Fit BigVAR with rolling CV
 # -----------------------------
+
+
 mod <- constructModel(
-  Y_sc,
+  Y,
   p      = P_LAGS,
   struct = STRUCT,
   gran   = GRAN,
@@ -230,20 +184,207 @@ mod <- constructModel(
 
 fit <- cv.BigVAR(mod)
 print(fit)
-
+LAMBDA_FIXED <- fit@OptimalLambda
 # Sparsity plot (built-in)
 SparsityPlot.BigVAR.results(fit)
 
-B <- as.matrix(fit@betaPred)
 
-# fraction exactly zero
-mean(B == 0)
 
-# how many nonzero coefficients
-sum(B != 0)
 
-# biggest coefficients
-sort(abs(as.vector(B)), decreasing = TRUE)[1:20]
+```
+
+## Joint Impulse Response Functions
+
+```{r, fig.width=10, fig.height=10}
+
+library(tidyverse)
+
+# ============================================================
+# Helpers: (1) Phi extraction, (2) VMA recursion, (3) residuals
+# ============================================================
+
+extract_phi_from_fit <- function(fit, K, p) {
+  B <- as.matrix(fit@betaPred)
+  if (ncol(B) == K * p + 1) B <- B[, -1, drop = FALSE]  # drop intercept if present
+
+  Phi <- array(0, dim = c(K, K, p))
+  for (lag in 1:p) {
+    cols <- ((lag - 1) * K + 1):(lag * K)
+    Phi[, , lag] <- B[, cols, drop = FALSE]
+  }
+  Phi
+}
+
+vma_from_phi <- function(Phi, H) {
+  K <- dim(Phi)[1]
+  p <- dim(Phi)[3]
+  A <- array(0, dim = c(K, K, H))
+  A[, , 1] <- diag(K) # A0
+  for (h in 2:H) {
+    acc <- matrix(0, K, K)
+    for (l in 1:min(p, h - 1)) {
+      acc <- acc + Phi[, , l] %*% A[, , h - l]
+    }
+    A[, , h] <- acc
+  }
+  A
+}
+
+var_residuals <- function(Y, Phi) {
+  Tn <- nrow(Y); K <- ncol(Y); p <- dim(Phi)[3]
+  E <- matrix(NA_real_, nrow = Tn - p, ncol = K)
+
+  for (t in (p + 1):Tn) {
+    yhat <- rep(0, K)
+    for (l in 1:p) yhat <- yhat + Phi[, , l] %*% Y[t - l, ]
+    E[t - p, ] <- Y[t, ] - yhat
+  }
+  colnames(E) <- colnames(Y)
+  E
+}
+
+# Coerce BigVAR.fit output into a single K x (K*p) coefficient matrix
+as_coef_matrix <- function(Bb_raw, K, p) {
+  # Sometimes BigVAR.fit returns a 3D array (K x (Kp [+1]) x nLambda)
+  if (length(dim(Bb_raw)) == 3) {
+    Bb_raw <- Bb_raw[, , 1, drop = TRUE]
+  }
+  Bb <- as.matrix(Bb_raw)
+
+  # Drop intercept col if present
+  if (ncol(Bb) == K * p + 1) Bb <- Bb[, -1, drop = FALSE]
+
+  Bb
+}
+
+# ============================================================
+# jIRF (Wiesen/Beaumont form) with "2 SD" joint shock scaling
+# ============================================================
+
+jIRF <- function(A, sigma_eps, setJ_idx, shock_sd = 2) {
+  K <- dim(sigma_eps)[1]
+  H <- dim(A)[3]
+
+  eJ <- diag(K)[, setJ_idx, drop = FALSE]
+  sJ <- sqrt(diag(t(eJ) %*% sigma_eps %*% eJ))  # 1-SD in joint shock space
+  sJ <- shock_sd * sJ                            # scale to 2-SD (or chosen)
+
+  middle <- solve(t(eJ) %*% sigma_eps %*% eJ)
+
+  out <- matrix(0, nrow = K, ncol = H)
+  for (h in 1:H) {
+    out[, h] <- A[, , h] %*% sigma_eps %*% eJ %*% middle %*% sJ
+  }
+  out
+}
+
+# ============================================================
+# Shock set: Information Technology firms
+# ============================================================
+
+TICKERS <- meta$symbol
+K <- length(TICKERS)
+
+tech_idx <- which(meta$sector == "Information Technology")
+
+# ============================================================
+# Point estimate (from your fitted BigVAR)
+# ============================================================
+
+Phi_hat <- extract_phi_from_fit(fit, K = K, p = P_LAGS)
+A_hat   <- vma_from_phi(Phi_hat, H = H_IRF)
+
+E_hat     <- fit@resids
+sigma_hat <- cov(E_hat)
+
+jirf_hat <- jIRF(A_hat, sigma_hat, setJ_idx = tech_idx, shock_sd = SHOCK_SD)
+colnames(jirf_hat) <- paste0("h", 0:(H_IRF - 1))
+rownames(jirf_hat) <- TICKERS
+
+# ============================================================
+# Bootstrap CI: residual bootstrap + re-fit BigVAR at fixed lambda
+# ============================================================
+
+# Use the lambda selected by cross-validation
+LAMBDA_FIXED <- as.numeric(fit@OptimalLambda)[1]
+
+simulate_var_resid_boot <- function(Y_init, Phi, E) {
+  Tn <- nrow(Y_init); K <- ncol(Y_init); p <- dim(Phi)[3]
+
+  Yb <- Y_init
+  Eb <- E[sample.int(nrow(E), size = Tn - p, replace = TRUE), , drop = FALSE]
+
+  for (t in (p + 1):Tn) {
+    yhat <- rep(0, K)
+    for (l in 1:p) yhat <- yhat + Phi[, , l] %*% Yb[t - l, ]
+    Yb[t, ] <- yhat + Eb[t - p, ]
+  }
+  Yb
+}
+
+B_BOOT <- 300
+boot_paths <- array(NA_real_, dim = c(K, H_IRF, B_BOOT))
+
+for (b in 1:B_BOOT) {
+  # 1) simulate bootstrap series
+  Yb <- simulate_var_resid_boot(Y_init = Y, Phi = Phi_hat, E = E_hat)
+
+  # 2) re-fit at fixed lambda (fast)
+  Bb_raw <- BigVAR::BigVAR.fit(
+    Yb, p = P_LAGS, struct = STRUCT,
+    lambda = LAMBDA_FIXED,
+    intercept = FALSE
+  )
+  Bb <- as_coef_matrix(Bb_raw, K = K, p = P_LAGS)
+
+  # 3) build Phi_b
+  Phi_b <- array(0, dim = c(K, K, P_LAGS))
+  for (lag in 1:P_LAGS) {
+    cols <- ((lag - 1) * K + 1):(lag * K)
+    Phi_b[, , lag] <- Bb[, cols, drop = FALSE]
+  }
+
+  # 4) A_b, sigma_b, jIRF_b
+  A_b <- vma_from_phi(Phi_b, H = H_IRF)
+  E_b <- var_residuals(Yb, Phi_b)
+  sigma_b <- cov(E_b)
+
+  boot_paths[, , b] <- jIRF(A_b, sigma_b, setJ_idx = tech_idx, shock_sd = SHOCK_SD)
+}
+
+# 90% CI band (5%–95%)
+ci_lo <- apply(boot_paths, c(1, 2), quantile, probs = 0.05, na.rm = TRUE)
+ci_hi <- apply(boot_paths, c(1, 2), quantile, probs = 0.95, na.rm = TRUE)
+
+jirf_ci_long <- tibble(
+  response = rep(TICKERS, each = H_IRF),
+  horizon  = rep(0:(H_IRF - 1), times = K),
+  point    = as.vector(jirf_hat),
+  lo       = as.vector(ci_lo),
+  hi       = as.vector(ci_hi)
+) %>%
+  left_join(meta %>% select(symbol, sector) %>% rename(response = symbol, response_sector = sector),
+            by = "response")
+
+# ============================================================
+# Plot: response-by-ticker (facets) with bootstrap ribbon
+# ============================================================
+
+p_tech_jirf <- jirf_ci_long %>%
+  ggplot(aes(x = horizon, y = point)) +
+  geom_hline(yintercept = 0) +
+  geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2) +
+  geom_line() +
+  facet_wrap(~ response, scales = "free_y", ncol = 5) +
+  labs(
+    title = "jIRF: 2-SD joint shock to Information Technology firms (bootstrap 90% CI)",
+    x = "Horizon (days)",
+    y = "Response"
+  ) +
+  theme_minimal()
+
+print(p_tech_jirf)
+
 
 ```
 
