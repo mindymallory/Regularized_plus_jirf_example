@@ -16,9 +16,9 @@ library(readr)
 
 # top S&P tickers by market cap exlcuding recents like NVDA, TSLA
 TICKERS <- c(
-  "AAPL","MSFT","AMZN"#,
-  #"GOOGL","AVGO","META","BRK.B","LLY","WMT","JPM",
-  #"V","ORCL","MA","XOM","JNJ"
+  "AAPL","MSFT","AMZN",
+  "GOOGL","AVGO","META","BRK.B","LLY","WMT","JPM",
+  "V","ORCL","MA","XOM","JNJ"
 )
 
 #API_KEY <- ""
@@ -34,18 +34,18 @@ meta <- tibble::tribble(
   "AAPL",  "Apple",                                "Information Technology",
   "MSFT",  "Microsoft",                            "Information Technology",
   "AMZN",  "Amazon",                               "Consumer Discretionary",
-  # "GOOGL", "Alphabet (Class A)",                   "Communication Services",
-  # "AVGO",  "Broadcom",                             "Information Technology",
-  # "META",  "Meta Platforms",                       "Communication Services",
-  # "BRK.B", "Berkshire Hathaway (Class B)",         "Financials",
-  # "LLY",   "Eli Lilly",                            "Health Care",
-  # "WMT",   "Walmart",                              "Consumer Staples",
-  # "JPM",   "JPMorgan Chase",                       "Financials",
-  # "V",     "Visa",                                 "Financials",
-  # "ORCL",  "Oracle",                               "Information Technology",
-  # "MA",    "Mastercard",                           "Financials",
-  # "XOM",   "Exxon Mobil",                          "Energy",
-  # "JNJ",   "Johnson & Johnson",                    "Health Care"
+  "GOOGL", "Alphabet (Class A)",                   "Communication Services",
+  "AVGO",  "Broadcom",                             "Information Technology",
+  "META",  "Meta Platforms",                       "Communication Services",
+  "BRK.B", "Berkshire Hathaway (Class B)",         "Financials",
+  "LLY",   "Eli Lilly",                            "Health Care",
+  "WMT",   "Walmart",                              "Consumer Staples",
+  "JPM",   "JPMorgan Chase",                       "Financials",
+  "V",     "Visa",                                 "Financials",
+  "ORCL",  "Oracle",                               "Information Technology",
+  "MA",    "Mastercard",                           "Financials",
+  "XOM",   "Exxon Mobil",                          "Energy",
+  "JNJ",   "Johnson & Johnson",                    "Health Care"
 )
 write_csv(meta, OUT_META)
 
@@ -193,28 +193,29 @@ LAMBDA_FIXED <- fit@OptimalLambda
 #
 
 
-extract_phi_from_fit <- function(fit, K, p) {
-  B <- as.matrix(fit@betaPred)
-  if (ncol(B) == K * p + 1) B <- B[, -1, drop = FALSE]
-  Phi <- array(0, dim = c(K, K, p))
-  for (lag in 1:p) {
-    cols <- ((lag - 1) * K + 1):(lag * K)
-    Phi[, , lag] <- B[, cols, drop = FALSE]
-  }
-  Phi
-}
+# Save model output for later use, since cross validation takes a long time
 
-companion_max_root <- function(Phi) {
-  K <- dim(Phi)[1]; p <- dim(Phi)[3]
-  F <- matrix(0, nrow = K*p, ncol = K*p)
-  F[1:K, 1:(K*p)] <- do.call(cbind, lapply(1:p, \(j) Phi[, , j]))
-  if (p > 1) F[(K+1):(K*p), 1:(K*(p-1))] <- diag(K*(p-1))
-  max(Mod(eigen(F, only.values = TRUE)$values))
-}
+saved_model <- list(
+  created_utc = as.character(Sys.time()),
+  tickers     = colnames(Y),
+  p_lags      = P_LAGS,
+  struct      = STRUCT,              # e.g. "BasicEN"
+  gran        = GRAN,
+  T1          = T1,
+  T2          = T2,
+  alpha_grid  = ALPHA_GRID,
 
-Phi_en <- extract_phi_from_fit(fit_en, K = ncol(Y), p = P_LAGS)
-max_root <- companion_max_root(Phi_en)
-max_root
+  # Optimal tuning
+  optimal_lambda = as.numeric(fit_en@OptimalLambda)[1],
+  optimal_alpha  = if ("OptimalAlpha" %in% slotNames(fit_en)) as.numeric(fit_en@OptimalAlpha)[1] else NA_real_,
+
+  # What you need for sparsity + IRF
+  betaPred = fit_en@betaPred,
+  resids   = fit_en@resids
+)
+
+dir.create("models", showWarnings = FALSE)
+saveRDS(saved_model, file = "models/bigvar_opt_model.rds")
 
 ```
 
@@ -222,7 +223,13 @@ max_root
 
 ```{r, fig.width=10, fig.height=10}
 
-library(tidyverse)
+
+saved_model <- readRDS("models/bigvar_opt_model.rds")
+
+B <- as.matrix(saved_model$betaPred)
+E <- as.matrix(saved_model$resids)
+
+# Now you can do SparsityPlot/jIRF using B and E (no CV)
 
 # ============================================================
 # Helpers: (1) Phi extraction, (2) VMA recursion, (3) residuals
@@ -316,10 +323,10 @@ tech_idx <- which(meta$sector == "Information Technology")
 # Point estimate (from your fitted BigVAR)
 # ============================================================
 
-Phi_hat <- extract_phi_from_fit(fit, K = K, p = P_LAGS)
+Phi_hat <- extract_phi_from_fit(fit_en, K = K, p = P_LAGS)
 A_hat   <- vma_from_phi(Phi_hat, H = H_IRF)
 
-E_hat     <- fit@resids
+E_hat     <- fit_en@resids
 sigma_hat <- cov(E_hat)
 
 jirf_hat <- jIRF(A_hat, sigma_hat, setJ_idx = tech_idx, shock_sd = SHOCK_SD)
