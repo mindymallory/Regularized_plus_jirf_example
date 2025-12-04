@@ -21,7 +21,7 @@ TICKERS <- c(
   "V","ORCL","MA","XOM","JNJ"
 )
 
-#API_KEY <- ""
+API_KEY <- "VFVETDZPXW4IOBLD"
 
 dir.create("data", showWarnings = FALSE)
 OUT_PRICES <- "data/sp500_top15_prices_long.csv"
@@ -102,10 +102,14 @@ META_CSV    <- "data/sp500_top15_meta.csv"
 
 P_LAGS  <- 5            # VAR order
 STRUCT  <- "BasicEN"      # regularization structure (EN elastic net)
-GRAN    <- c(500, 50)   # lambda grid: (path length, # grid points)
+#GRAN    <- c(500, 50)   # lambda grid: (path length, # grid points)
 H_IRF   <- 20           # horizons: 0..20
 SHOCK_SD <- 2           # 2-SD joint shocks
-ALPHA_GRID <- seq(0.05, .5, by = 0.05)   # 1 = pure lasso, smaller = more ridge
+#ALPHA_GRID <- seq(0.05, .5, by = 0.05)   # 1 = pure lasso, smaller = more ridge
+GRAN     <- c(10, 5)             # MUCH smaller than c(500, 50)
+ALPHA_GRID <- c(0.1, 0.5) # small grid
+
+
 # -----------------------------
 # 1) Load data
 # -----------------------------
@@ -188,34 +192,9 @@ mod_en <- constructModel(
 
 fit_en <- cv.BigVAR(mod_en)
 print(fit_en)
+
 SparsityPlot.BigVAR.results(fit_en)
-LAMBDA_FIXED <- fit@OptimalLambda
-#
 
-
-# Save model output for later use, since cross validation takes a long time
-
-saved_model <- list(
-  created_utc = as.character(Sys.time()),
-  tickers     = colnames(Y),
-  p_lags      = P_LAGS,
-  struct      = STRUCT,              # e.g. "BasicEN"
-  gran        = GRAN,
-  T1          = T1,
-  T2          = T2,
-  alpha_grid  = ALPHA_GRID,
-
-  # Optimal tuning
-  optimal_lambda = as.numeric(fit_en@OptimalLambda)[1],
-  optimal_alpha  = if ("OptimalAlpha" %in% slotNames(fit_en)) as.numeric(fit_en@OptimalAlpha)[1] else NA_real_,
-
-  # What you need for sparsity + IRF
-  betaPred = fit_en@betaPred,
-  resids   = fit_en@resids
-)
-
-dir.create("models", showWarnings = FALSE)
-saveRDS(saved_model, file = "models/bigvar_opt_model.rds")
 
 ```
 
@@ -224,10 +203,8 @@ saveRDS(saved_model, file = "models/bigvar_opt_model.rds")
 ```{r, fig.width=10, fig.height=10}
 
 
-saved_model <- readRDS("models/bigvar_opt_model.rds")
 
-B <- as.matrix(saved_model$betaPred)
-E <- as.matrix(saved_model$resids)
+
 
 # Now you can do SparsityPlot/jIRF using B and E (no CV)
 
