@@ -21,7 +21,7 @@ TICKERS <- c(
   "V","ORCL","MA","XOM","JNJ"
 )
 
-API_KEY <- "VFVETDZPXW4IOBLD"
+API_KEY <- ""
 
 dir.create("data", showWarnings = FALSE)
 OUT_PRICES <- "data/sp500_top15_prices_long.csv"
