@@ -21,6 +21,7 @@ TICKERS <- c(
   "V","ORCL","MA","XOM","JNJ"
 )
 
+
 API_KEY <- ""
 
 dir.create("data", showWarnings = FALSE)
